@@ -1,0 +1,118 @@
+#!/usr/bin/python2
+# Requires python2-dateutil python2-oauth python2-pytz
+#
+# https://dev.twitter.com/docs/api
+#
+## FUTURE DEV
+## auth auth auth
+import sys
+import time
+import datetime;
+import dateutil;
+from dateutil import parser
+import pytz;
+import oauth2 as oauth;
+import json
+
+## No of tweets to grab
+numtweets = 50
+
+# These change with each user using the application, get them from dev.twitter.com
+user_key = 'XXXXXX';
+user_secret = 'XXXXXX';
+
+# Consumer key and secret
+con_key='XXXXXX'
+con_secret='XXXXXX'
+
+global count
+count=0
+
+# Makes calls to twitter
+def oauth_req(url, key, secret, http_method, post_body="", http_headers=None):
+	consumer = oauth.Consumer(key=con_key, secret=con_secret)
+	token = oauth.Token(key=key, secret=secret)
+	client = oauth.Client(consumer, token)
+
+	resp, content = client.request(
+		url,
+		method=http_method,
+		body=post_body,
+		headers=http_headers,
+       )
+	return content
+
+
+       
+
+# Twitter API calls    
+def tweetgrab():
+	try: my_tweets = oauth_req('https://api.twitter.com/1.1/statuses/user_timeline.json?count='+str(numtweets), user_key, user_secret, "GET"); return my_tweets
+	except:sys.exit("Couldn't retrieve your tweets")
+	
+def tweetdelete(tweetid):
+	global count
+	print "Deleting "+str(tweetid)
+	try: delstatus = oauth_req('https://api.twitter.com/1.1/statuses/destroy/'+str(tweetid)+'.json?trim_user=f', user_key, user_secret, "POST");
+	except: print sys.exc_info()[0]
+	count=count+1
+
+def now():
+	datetime.tzinfo="UTC"
+	now = datetime.datetime.now(tz=pytz.timezone("UTC"))
+	return now
+	
+def del_old(timelive, tweetid, contents):
+	if (keepphrase==False and timelive.total_seconds()>keeptime) or (keepphrase==True and timelive.total_seconds()>keeptime and contents.text.find(phrasetokeep)==-1):
+		tweetdelete(tweetid)
+
+def del_range(createdtime, tweetid):
+	if (starttime <= createdtime <= endtime):
+		tweetdelete(tweetid)
+
+def del_phrase(tweetid, contents):
+	if (contents.text.find(delphrase)!=-1):
+		tweetdelete(tweetid)
+
+def status_loop(opt):
+# Element Tree like a boss: http://docs.python.org/2/library/xml.etree.elementtree.html
+	# Parse API output to XML doc
+	global count
+	jsontweets = json.loads(tweetgrab())
+	#time=now()
+	time=datetime.datetime.now()
+	
+	for status in jsontweets:
+		createdtime = status['created_at']
+		timeformat = datetime.datetime.strptime(createdtime, '%a %b %d %H:%M:%S +0000 %Y')
+		tweetid = status['id']
+		text = status['text']
+		if opt=="del_old":
+			del_old(time-timeformat, tweetid, text)
+		elif opt=="del_range":
+			del_range(createdtime, tweetid)
+		elif opt=="del_phrase":
+			del_phrase(tweetid, text)
+		
+	print "Deleted "+str(count)+" tweets."
+	
+try: operation = sys.argv[+1]
+except: sys.exit("twitterwipe requires one of the following options: olderthan, between, or containing")
+if operation=="olderthan":
+	try: keeptime = int(sys.argv[+2]) * 60 * 60
+	except:sys.exit("twitterwipe olderthan takes an argument: The number of hours after which tweets should be deleted eg. 48.\n\ntwitterwipe olderthan can take an optional argument to preserve tweets contaning a certain string eg. \"lovely penguins\"")
+	try: phrasetokeep = sys.argv[+3]; keepphrase = True
+	except: keepphrase = False; print "Not preserving any tweets"
+	status_loop("del_old")
+	
+if operation=="between":
+	try: starttime = parser.parse(sys.argv[+2]); endtime = parser.parse(sys.argv[+3])
+	except:sys.exit("twitterwipe between takes two arguments: The starting date and time and the ending date and time between which tweets should be deleted eg. \"1/12/2012 00:00:00 +0000\" \"25/12/2012 00:00:00 +0000\"")
+	status_loop("del_range")
+	
+if operation=="containing":
+	try: delphrase = str(sys.argv[+2])
+	except:sys.exit("twitterwipe containing takes an argument: The phrase which tweets to be deleted should contain eg. \"evil penguins\"")
+	status_loop("del_phrase")
+
+
